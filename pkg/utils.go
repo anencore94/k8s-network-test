@@ -24,7 +24,7 @@ const pollIntervalToPing = 2 * time.Second // retry every 3 s
 func getClientSet() (*kubernetes.Clientset, *restclient.Config) {
 	var kubeconfig *string
 	flag.Set("logtostderr", "true")
-
+	glog.Info("========== [TEST] Start Fetching Current kubernetes client ==========\n")
 	home, err := os.UserHomeDir()
 	if err != nil {
 		panic(err)
@@ -100,6 +100,7 @@ func makePodSpec(podNamePrefix string, namespace string) *corev1.Pod {
 	return podSpec
 }
 
+// TODO node 지정 parameter 필요
 func createPod(clientset *kubernetes.Clientset, podName string, namespace string) (*corev1.Pod, error) {
 	pod := makePodSpec(podName, namespace)
 	podOut, err := clientset.CoreV1().Pods(namespace).Create(pod)
@@ -126,7 +127,7 @@ func waitTimeoutForPodStatus(clientset *kubernetes.Clientset, podName string, na
 	return nil
 }
 
-func getPodIp(clientset *kubernetes.Clientset, podName string, namespace string) (string, error) {
+func getPodIP(clientset *kubernetes.Clientset, podName string, namespace string) (string, error) {
 	out, err := clientset.CoreV1().Pods(namespace).Get(podName, metav1.GetOptions{})
 
 	return out.Status.PodIP, err
@@ -135,11 +136,11 @@ func getPodIp(clientset *kubernetes.Clientset, podName string, namespace string)
 /////////////////////
 // TODO pod2pod network test 더 간단하게 하는 방법
 // 아래 코드는 a4abhishek / Client-Go-Examples 의 github 참고
-func canPingFromPodToIpAddr(podName string, namespace string, destinationIpAddress string, clientset *kubernetes.Clientset,
+func isPossibleToPingFromPodToIP(podName string, namespace string, destinationIPAddress string, clientset *kubernetes.Clientset,
 	config *restclient.Config) bool {
-	glog.Infof("====== Trying to ping from '%s' pod => '%s' for every %.1f seconds ======", podName, destinationIpAddress, pollIntervalToPing.Seconds())
+	glog.Infof("====== Trying to ping from '%s' pod => '%s' for every %.1f seconds ======", podName, destinationIPAddress, pollIntervalToPing.Seconds())
 	//TODO 커맨드에 ping 명령어 이후 파이프라인(|)이랑 "> /dev/null" 먹지 않아서 조잡하게 코드 짰는데 확인 필요
-	command := []string{"/bin/ping", "-c", "2", destinationIpAddress}
+	command := []string{"/bin/ping", "-c", "2", destinationIPAddress}
 
 	req := clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
