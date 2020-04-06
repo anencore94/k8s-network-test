@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/golang/glog"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -55,7 +56,7 @@ func makeNamespaceSpec(namespacePrefix string) *corev1.Namespace {
 	namespaceSpec := &corev1.Namespace{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Namespace",
-			APIVersion: "v1",
+			APIVersion: "appsv1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: namespacePrefix,
@@ -71,6 +72,36 @@ func createNamespace(clientset *kubernetes.Clientset, nsSpec *corev1.Namespace) 
 	return ns, err
 }
 
+func makePodSpecInSpecificNode(podNamePrefix string, nodeName string, namespace string) *corev1.Pod {
+	//TODO need to be clean
+	cmd := []string{"sleep", "3600"}
+
+	podSpec := &corev1.Pod{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Pod",
+			APIVersion: "appsv1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: podNamePrefix,
+			Namespace:    namespace,
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Image:           "busybox",
+					Name:            "busybox",
+					Command:         cmd,
+					ImagePullPolicy: corev1.PullIfNotPresent,
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyAlways,
+			NodeName:      nodeName,
+		},
+	}
+
+	return podSpec
+}
+
 func makePodSpec(podNamePrefix string, namespace string) *corev1.Pod {
 	//TODO need to be clean
 	cmd := []string{"sleep", "3600"}
@@ -78,7 +109,7 @@ func makePodSpec(podNamePrefix string, namespace string) *corev1.Pod {
 	podSpec := &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",
-			APIVersion: "v1",
+			APIVersion: "appsv1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: podNamePrefix,
@@ -100,12 +131,67 @@ func makePodSpec(podNamePrefix string, namespace string) *corev1.Pod {
 	return podSpec
 }
 
-// TODO node 지정 parameter 필요
-func createPod(clientset *kubernetes.Clientset, podName string, namespace string) (*corev1.Pod, error) {
+func makeDaemonsetSpec(dmsNamePrefix string, namespace string) *appsv1.DaemonSet {
+	cmd := []string{"sleep", "3600"}
+
+	dmsSpec := &appsv1.DaemonSet{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Pod",
+			APIVersion: "apps/v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: dmsNamePrefix,
+			Namespace:    namespace,
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"sntt": "daemonset",
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"sntt": "daemonset",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Image:           "busybox",
+							Name:            "busybox",
+							Command:         cmd,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+						},
+					},
+					RestartPolicy: corev1.RestartPolicyAlways,
+				},
+			},
+		},
+	}
+
+	return dmsSpec
+}
+
+func createPodInSpecificNode(clientset *kubernetes.Clientset, podName string, nodeName string, namespace string) (*corev1.Pod, error) {
+	pod := makePodSpecInSpecificNode(podName, nodeName, namespace)
+	podOut, err := clientset.CoreV1().Pods(namespace).Create(pod)
+
+	return podOut, err
+}
+
+func createPodInRandomNode(clientset *kubernetes.Clientset, podName string, namespace string) (*corev1.Pod, error) {
 	pod := makePodSpec(podName, namespace)
 	podOut, err := clientset.CoreV1().Pods(namespace).Create(pod)
 
 	return podOut, err
+}
+
+func createDaemonset(clientset *kubernetes.Clientset, dmsName string, namespace string) (*appsv1.DaemonSet, error) {
+	dms := makeDaemonsetSpec(dmsName, namespace)
+	dmsOut, err := clientset.AppsV1().DaemonSets(namespace).Create(dms)
+
+	return dmsOut, err
 }
 
 func waitTimeoutForPodStatus(clientset *kubernetes.Clientset, podName string, namespace string,
@@ -122,6 +208,26 @@ func waitTimeoutForPodStatus(clientset *kubernetes.Clientset, podName string, na
 
 	if err != nil {
 		return fmt.Errorf("Pod %s not in phase %s within %v ", pod, desiredStatus, timeout)
+	}
+
+	return nil
+}
+
+func waitTimeoutForDaemonsetReady(clientset *kubernetes.Clientset, dmsName string, namespace string,
+	timeout time.Duration) error {
+
+	err := wait.PollImmediate(pollIntervalToPing, timeout, func() (bool, error) {
+		dmsout, err := clientset.AppsV1().DaemonSets(namespace).Get(dmsName, metav1.GetOptions{})
+		if err != nil || dmsout.Status.DesiredNumberScheduled != dmsout.Status.NumberReady ||
+			dmsout.Status.DesiredNumberScheduled != dmsout.Status.NumberAvailable {
+			glog.Infof("Daemonset %s is still creating", dmsout.Name)
+			return false, err
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("Daemonset %s is not ready yet", dmsName)
 	}
 
 	return nil
