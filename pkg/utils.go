@@ -22,20 +22,27 @@ import (
 
 const pollIntervalToPing = 2 * time.Second // retry every 3 s
 
+// getKubeconfigPathFromEnv gets the path to the first kubeconfig
+func getKubeconfigPathFromEnv() string {
+	kubeConfigEnv := os.Getenv("KUBECONFIG")
+
+	if kubeConfigEnv == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			panic(err)
+		}
+		kubeConfigEnv = filepath.Join(home, ".kube", "config")
+	}
+
+	return kubeConfigEnv
+}
+
 func getClientSet() (*kubernetes.Clientset, *restclient.Config) {
 	var kubeconfig *string
 	flag.Set("logtostderr", "true")
 	glog.Info("========== [TEST] Start Fetching Current kubernetes client ==========\n")
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
 
-	if home != "" {
-		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
-	} else {
-		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
-	}
+	kubeconfig = flag.String("kubeconfig", getKubeconfigPathFromEnv(), "absolute path to the kubeconfig file")
 
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
